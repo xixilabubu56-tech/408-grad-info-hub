@@ -40,7 +40,9 @@
 - 前端改成通过环境变量读取 API 地址
 - 后端支持通过环境变量配置 CORS 域名
 - 增加了 `.env.example` 模板文件
+- 增加了生产环境变量模板文件
 - 增加了 `vercel.json`，避免 React Router 刷新 404
+- 增加了 `render.yaml`，方便直接在 Render 中按仓库配置部署
 
 ---
 
@@ -225,6 +227,10 @@ DATABASE_URL=mysql+pymysql://root:abc123@containers-us-west-xxx.railway.app:6543
 - Root Directory：`backend`
 - Runtime：Python
 
+如果你想少手动填一些内容，也可以直接使用仓库根目录的：
+
+- [render.yaml](file:///Users/macbook/Desktop/408project/information/render.yaml)
+
 Build Command：
 
 ```bash
@@ -255,6 +261,10 @@ CORS_ORIGINS=*
 ```
 
 上线后再改成正式前端域名更安全。
+
+你也可以直接参考：
+
+- [backend/.env.production.example](file:///Users/macbook/Desktop/408project/information/backend/.env.production.example)
 
 ---
 
@@ -338,6 +348,10 @@ VITE_API_BASE_URL=https://grad-info-408-api.onrender.com
 ```
 
 我已经帮你把前端改成读取这个环境变量，所以这是上线必填项。
+
+可直接参考：
+
+- [frontend/.env.production.example](file:///Users/macbook/Desktop/408project/information/frontend/.env.production.example)
 
 ---
 
