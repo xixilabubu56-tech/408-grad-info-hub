@@ -1,8 +1,8 @@
 import os
 
-from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Depends, FastAPI, HTTPException, Query
 from fastapi.middleware.cors import CORSMiddleware
-from sqlalchemy import func
+from sqlalchemy import func, or_, text
 from sqlalchemy.orm import Session, selectinload
 import uvicorn
 from dotenv import load_dotenv
@@ -16,6 +16,7 @@ cors_origins = os.getenv("CORS_ORIGINS", "*")
 allow_origins = ["*"] if cors_origins.strip() == "*" else [
     origin.strip() for origin in cors_origins.split(",") if origin.strip()
 ]
+allow_credentials = allow_origins != ["*"]
 
 app = FastAPI(
     title="408 Grad Info Hub API",
@@ -26,7 +27,7 @@ app = FastAPI(
 app.add_middleware(
     CORSMiddleware,
     allow_origins=allow_origins,
-    allow_credentials=True,
+    allow_credentials=allow_credentials,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -50,6 +51,16 @@ def build_tags(inst: models.Institution) -> list[str]:
 def build_institution_item(inst: models.Institution) -> dict:
     majors = inst.majors or []
     colleges = {major.college_name for major in majors if major.college_name}
+    latest_year = max(
+        (
+            item.year
+            for major in majors
+            for item in (major.historical_data or [])
+            if item.year
+        ),
+        default=None,
+    )
+    sample_majors = sorted({major.major_name for major in majors if major.major_name})[:4]
     return {
         "id": inst.id,
         "school_code": inst.school_code,
@@ -63,6 +74,8 @@ def build_institution_item(inst: models.Institution) -> dict:
         "majorCount": len(majors),
         "collegeCount": len(colleges),
         "noticeCount": len(inst.notices or []),
+        "latestYear": latest_year,
+        "sampleMajors": sample_majors,
         "tags": build_tags(inst),
     }
 
@@ -70,6 +83,17 @@ def build_institution_item(inst: models.Institution) -> dict:
 @app.get("/")
 def read_root():
     return {"message": "Welcome to 408 Grad Info Hub API V2!"}
+
+
+@app.get("/api/health")
+def get_health(db: Session = Depends(get_db)):
+    db.execute(text("SELECT 1"))
+    institution_count = db.query(func.count(models.Institution.id)).scalar() or 0
+    return {
+        "status": "ok",
+        "database": "connected",
+        "institutionCount": institution_count,
+    }
 
 
 @app.get("/api/summary")
@@ -80,6 +104,8 @@ def get_summary(db: Session = Depends(get_db)):
     latest_year = db.query(func.max(models.HistoricalData.year)).scalar()
     college_names = db.query(models.Major.college_name).distinct().all()
     college_count = len([name for name, in college_names if name])
+    province_count = db.query(models.Institution.province).distinct().count()
+    latest_notice_date = db.query(func.max(models.OfficialNotice.publish_date)).scalar()
     top_institutions = (
         db.query(models.Institution)
         .order_by(models.Institution.ranking.asc())
@@ -91,7 +117,9 @@ def get_summary(db: Session = Depends(get_db)):
         "majorCount": major_count,
         "collegeCount": college_count,
         "noticeCount": notice_count,
+        "provinceCount": province_count,
         "latestYear": latest_year,
+        "latestNoticeDate": latest_notice_date.strftime("%Y-%m-%d") if latest_notice_date else None,
         "topInstitutions": [
             {
                 "id": inst.id,
@@ -103,27 +131,80 @@ def get_summary(db: Session = Depends(get_db)):
     }
 
 
+@app.get("/api/institutions/filters")
+def get_institution_filters(db: Session = Depends(get_db)):
+    provinces = [
+        province
+        for province, in (
+            db.query(models.Institution.province)
+            .distinct()
+            .order_by(models.Institution.province.asc())
+            .all()
+        )
+        if province
+    ]
+    return {
+        "provinces": provinces,
+        "schoolTypes": [
+            {"label": "985 工程", "value": "985"},
+            {"label": "211 工程", "value": "211"},
+            {"label": "双一流", "value": "double_first_class"},
+        ],
+        "degreeTypes": [
+            {"label": "学硕", "value": "academic"},
+            {"label": "专硕", "value": "professional"},
+        ],
+    }
+
+
 @app.get("/api/institutions")
 def get_institutions(
     skip: int = 0,
     limit: int = 100,
     q: str | None = None,
+    province: str | None = None,
+    school_type: str | None = Query(default=None, pattern="^(985|211|double_first_class)?$"),
+    degree_type: str | None = Query(default=None, pattern="^(academic|professional)?$"),
     db: Session = Depends(get_db),
 ):
-    query = db.query(models.Institution).options(
-        selectinload(models.Institution.majors),
-        selectinload(models.Institution.notices),
+    query = (
+        db.query(models.Institution)
+        .outerjoin(models.Major)
+        .options(
+            selectinload(models.Institution.majors).selectinload(models.Major.historical_data),
+            selectinload(models.Institution.notices),
+        )
     )
 
     if q:
         keyword = f"%{q.strip()}%"
         query = query.filter(
-            models.Institution.name.ilike(keyword)
-            | models.Institution.province.ilike(keyword)
+            or_(
+                models.Institution.name.ilike(keyword),
+                models.Institution.province.ilike(keyword),
+                models.Institution.city.ilike(keyword),
+                models.Major.major_name.ilike(keyword),
+                models.Major.college_name.ilike(keyword),
+                models.Major.major_code.ilike(keyword),
+            )
         )
 
+    if province:
+        query = query.filter(models.Institution.province == province)
+
+    if school_type == "985":
+        query = query.filter(models.Institution.is_985.is_(True))
+    elif school_type == "211":
+        query = query.filter(models.Institution.is_211.is_(True))
+    elif school_type == "double_first_class":
+        query = query.filter(models.Institution.is_double_first_class.is_(True))
+
+    if degree_type:
+        query = query.filter(models.Major.degree_type == degree_type)
+
     institutions = (
-        query.order_by(models.Institution.ranking.asc())
+        query.distinct()
+        .order_by(models.Institution.ranking.asc())
         .offset(skip)
         .limit(min(limit, 200))
         .all()
@@ -166,6 +247,10 @@ def get_institution_detail(inst_id: int, db: Session = Depends(get_db)):
         "official_website": inst.official_website,
         "grad_website": inst.grad_website,
         "description": inst.description,
+        "latestYear": max((item.year for major in majors for item in major.historical_data), default=None),
+        "lastNoticeDate": (
+            max((notice.publish_date for notice in inst.notices if notice.publish_date), default=None)
+        ),
         "stats": {
             "majorCount": len(majors),
             "collegeCount": len(colleges),

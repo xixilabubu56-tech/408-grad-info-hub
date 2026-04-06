@@ -2,35 +2,47 @@ import requests
 from bs4 import BeautifulSoup
 import sys
 import os
-import time
+import hashlib
 
-# 把 backend 目录加入到 Python 搜索路径中，以便我们能导入数据库模块
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 from database import SessionLocal
 from models import Institution
+from utils import PROJECT_985, PROJECT_211
+
+
+def make_school_code(name):
+    return f"YZW-{hashlib.md5(name.encode('utf-8')).hexdigest()[:8].upper()}"
 
 def save_to_db(institutions_data):
-    """将爬取的数据保存到数据库"""
     db = SessionLocal()
     try:
-        count = 0
+        created = 0
+        updated = 0
         for data in institutions_data:
-            # 检查学校是否已经存在
             existing = db.query(Institution).filter(Institution.name == data['name']).first()
             if not existing:
                 new_inst = Institution(
                     name=data['name'],
                     province=data['province'],
-                    # 研招网列表通常不直接提供 985/211 标签，这里为了演示效果，我们简单匹配一下顶尖名校
-                    is_985=data['name'] in ["北京大学", "清华大学", "浙江大学", "复旦大学", "上海交通大学", "南京大学", "中国科学技术大学", "武汉大学", "华中科技大学", "中国人民大学"],
-                    is_211=data['name'] in ["北京邮电大学", "西安电子科技大学", "北京交通大学", "南京航空航天大学"] or data['name'] in ["北京大学", "清华大学", "浙江大学", "复旦大学", "上海交通大学", "南京大学", "中国科学技术大学", "武汉大学", "华中科技大学", "中国人民大学"],
-                    school_code="00000" # 演示用假代码
+                    city=data['province'],
+                    is_985=data['name'] in PROJECT_985,
+                    is_211=data['name'] in PROJECT_211,
+                    is_double_first_class=data['name'] in PROJECT_985 or data['name'] in PROJECT_211,
+                    school_code=make_school_code(data['name'])
                 )
                 db.add(new_inst)
-                count += 1
+                created += 1
+            else:
+                existing.province = data['province']
+                existing.city = data['province']
+                existing.is_985 = data['name'] in PROJECT_985
+                existing.is_211 = data['name'] in PROJECT_211
+                existing.is_double_first_class = data['name'] in PROJECT_985 or data['name'] in PROJECT_211
+                existing.school_code = existing.school_code or make_school_code(data['name'])
+                updated += 1
         
         db.commit()
-        print(f"✅ 成功将 {count} 条新院校数据保存到 MySQL 数据库！")
+        print(f"✅ 新增 {created} 所院校，更新 {updated} 所院校")
     except Exception as e:
         print(f"❌ 保存到数据库失败: {e}")
         db.rollback()
@@ -79,12 +91,10 @@ def fetch_and_save():
             cols = row.find_all('td')
             if len(cols) >= 2:
                 school_name = cols[0].text.strip()
-                # 研招网的名字通常带有类似 "(10001)北京大学" 的格式，我们尝试把前面的括号及数字去掉
                 if ')' in school_name:
                     school_name = school_name.split(')')[-1]
                     
                 location = cols[1].text.strip()
-                # 研招网的所在地通常带有类似 "(11)北京市" 的格式
                 if ')' in location:
                     location = location.split(')')[-1]
                     

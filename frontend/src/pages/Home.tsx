@@ -8,7 +8,9 @@ interface SummaryResponse {
   majorCount: number
   collegeCount: number
   noticeCount: number
+  provinceCount: number
   latestYear: number | null
+  latestNoticeDate: string | null
   topInstitutions: Array<{
     id: number
     name: string
@@ -21,9 +23,12 @@ export default function Home() {
   const [search, setSearch] = useState('')
   const [summary, setSummary] = useState<SummaryResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
 
   useEffect(() => {
-    fetch(apiUrl('/api/summary'))
+    const controller = new AbortController()
+
+    fetch(apiUrl('/api/summary'), { signal: controller.signal })
       .then((res) => {
         if (!res.ok) {
           throw new Error('summary request failed')
@@ -32,11 +37,15 @@ export default function Home() {
       })
       .then((data: SummaryResponse) => {
         setSummary(data)
+        setError(false)
         setLoading(false)
       })
       .catch(() => {
+        setError(true)
         setLoading(false)
       })
+
+    return () => controller.abort()
   }, [])
 
   const handleSearch = (e: React.KeyboardEvent<HTMLInputElement>) => {
@@ -70,6 +79,8 @@ export default function Home() {
     ],
     [summary],
   )
+
+  const quickKeywords = ['清华大学', '北京邮电大学', '西安电子科技大学', '电子信息', '网络空间安全']
 
   return (
     <main className="w-full flex-1 flex flex-col items-center pt-24 px-4 pb-16">
@@ -105,10 +116,16 @@ export default function Home() {
           </div>
 
           <div className="flex flex-wrap gap-3 text-sm text-gray-500">
-            <span>热门：清华大学</span>
-            <span>北京邮电大学</span>
-            <span>西安电子科技大学</span>
-            <span>电子信息</span>
+            {quickKeywords.map((keyword) => (
+              <button
+                key={keyword}
+                type="button"
+                onClick={() => navigate(`/institutions?q=${encodeURIComponent(keyword)}`)}
+                className="rounded-full bg-white/70 dark:bg-white/5 px-3 py-1.5 border border-gray-200 dark:border-gray-800 hover:opacity-80 transition"
+              >
+                {keyword}
+              </button>
+            ))}
           </div>
         </div>
 
@@ -163,6 +180,18 @@ export default function Home() {
           <p className="text-gray-500 mb-6">
             {summary?.latestYear ? `已整理到 ${summary.latestYear} 年数据，优先展示排名靠前院校。` : '正在同步最新院校数据。'}
           </p>
+          {summary && (
+            <div className="grid grid-cols-2 gap-3 mb-6">
+              <div className="rounded-2xl bg-gray-50 dark:bg-black/30 px-4 py-4">
+                <div className="text-sm text-gray-500">覆盖省份</div>
+                <div className="text-2xl font-semibold mt-1">{summary.provinceCount}</div>
+              </div>
+              <div className="rounded-2xl bg-gray-50 dark:bg-black/30 px-4 py-4">
+                <div className="text-sm text-gray-500">最近通知日期</div>
+                <div className="text-sm md:text-base font-semibold mt-2">{summary.latestNoticeDate ?? '待补充'}</div>
+              </div>
+            </div>
+          )}
           <div className="space-y-3">
             {(summary?.topInstitutions ?? []).map((institution) => (
               <Link
@@ -180,6 +209,11 @@ export default function Home() {
             {!loading && !summary?.topInstitutions?.length && (
               <div className="rounded-2xl border border-dashed border-gray-200 dark:border-gray-800 px-4 py-6 text-sm text-gray-500">
                 暂无摘要数据，请先启动后端并完成数据导入。
+              </div>
+            )}
+            {error && (
+              <div className="rounded-2xl border border-amber-200 bg-amber-50 text-amber-700 px-4 py-4 text-sm">
+                摘要接口暂时不可用，请确认后端已启动，或稍后刷新页面重试。
               </div>
             )}
           </div>

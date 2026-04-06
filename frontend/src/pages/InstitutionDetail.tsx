@@ -37,6 +37,8 @@ interface InstitutionDetailResponse {
   official_website?: string | null
   grad_website?: string | null
   description?: string | null
+  latestYear?: number | null
+  lastNoticeDate?: string | null
   colleges: string[]
   stats: {
     majorCount: number
@@ -57,21 +59,34 @@ export default function InstitutionDetail() {
   const { id } = useParams()
   const [data, setData] = useState<InstitutionDetailResponse | null>(null)
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
+  const [activeCollege, setActiveCollege] = useState('全部学院')
 
   useEffect(() => {
-    fetch(apiUrl(`/api/institutions/${id}`))
+    setLoading(true)
+    const controller = new AbortController()
+
+    fetch(apiUrl(`/api/institutions/${id}`), { signal: controller.signal })
       .then(res => {
         if (!res.ok) throw new Error("API failed");
         return res.json()
       })
       .then(result => {
         setData(result)
+        setError(false)
         setLoading(false)
       })
       .catch(err => {
         console.error("Fetch Detail Error:", err)
+        setError(true)
         setLoading(false)
       })
+
+    return () => controller.abort()
+  }, [id])
+
+  useEffect(() => {
+    setActiveCollege('全部学院')
   }, [id])
 
   const statItems = useMemo(
@@ -89,6 +104,12 @@ export default function InstitutionDetail() {
     return years.length ? Math.max(...years) : null
   }, [data])
 
+  const filteredMajors = useMemo(() => {
+    if (!data) return []
+    if (activeCollege === '全部学院') return data.majors
+    return data.majors.filter((major) => major.college_name === activeCollege)
+  }, [activeCollege, data])
+
   if (loading) {
     return (
       <div className="w-full min-h-screen flex justify-center items-center text-gray-400 pt-24">
@@ -101,7 +122,14 @@ export default function InstitutionDetail() {
   if (!data) {
     return (
       <div className="w-full min-h-screen flex flex-col justify-center items-center text-gray-400 pt-24 gap-4">
-        <p>未能找到该院校的数据或后端接口未启动</p>
+        <p>{error ? '院校详情接口暂时不可用，请确认后端与数据库状态。' : '未能找到该院校的数据或后端接口未启动'}</p>
+        <button
+          type="button"
+          onClick={() => window.location.reload()}
+          className="px-4 py-2 rounded-full bg-gray-100 dark:bg-gray-800 text-sm text-gray-600 dark:text-gray-300 hover:opacity-80 transition"
+        >
+          重新加载
+        </button>
         <Link to="/institutions" className="text-blue-500 hover:underline">返回院校列表</Link>
       </div>
     )
@@ -166,14 +194,37 @@ export default function InstitutionDetail() {
             })}
           </div>
 
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-6">
+            <div className="rounded-[1.5rem] bg-gray-50 dark:bg-black/30 p-5">
+              <div className="text-sm text-gray-500">最新数据年份</div>
+              <div className="text-2xl font-semibold mt-2">{data.latestYear ?? '待补充'}</div>
+            </div>
+            <div className="rounded-[1.5rem] bg-gray-50 dark:bg-black/30 p-5">
+              <div className="text-sm text-gray-500">最近通知日期</div>
+              <div className="text-2xl font-semibold mt-2">{data.lastNoticeDate ?? '待补充'}</div>
+            </div>
+          </div>
+
           <div className="rounded-[1.5rem] bg-gray-50 dark:bg-black/30 p-5">
             <div className="text-sm text-gray-500 mb-3">已覆盖招生学院</div>
             <div className="flex flex-wrap gap-2">
+              <button
+                type="button"
+                onClick={() => setActiveCollege('全部学院')}
+                className={`px-3 py-1.5 rounded-full text-sm border transition ${activeCollege === '全部学院' ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800'}`}
+              >
+                全部学院
+              </button>
               {data.colleges.length > 0 ? (
                 data.colleges.map((college) => (
-                  <span key={college} className="px-3 py-1.5 rounded-full bg-white dark:bg-gray-900 text-sm border border-gray-200 dark:border-gray-800">
+                  <button
+                    key={college}
+                    type="button"
+                    onClick={() => setActiveCollege(college)}
+                    className={`px-3 py-1.5 rounded-full text-sm border transition ${activeCollege === college ? 'bg-black text-white dark:bg-white dark:text-black border-black dark:border-white' : 'bg-white dark:bg-gray-900 border-gray-200 dark:border-gray-800'}`}
+                  >
                     {college}
-                  </span>
+                  </button>
                 ))
               ) : (
                 <span className="text-sm text-gray-400">暂未整理学院列表</span>
@@ -185,8 +236,11 @@ export default function InstitutionDetail() {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
           <div className="lg:col-span-2 space-y-8">
             <h2 className="text-2xl font-bold flex items-center"><BookOpen className="w-6 h-6 mr-2" /> 开设的 408 统考专业/学院</h2>
+            <div className="rounded-[1.5rem] bg-blue-50 dark:bg-blue-900/10 border border-blue-100 dark:border-blue-900/30 px-5 py-4 text-sm text-blue-700 dark:text-blue-300">
+              当前展示 {filteredMajors.length} 个专业，筛选维度为：{activeCollege}
+            </div>
             
-            {data.majors && data.majors.length > 0 ? data.majors.map((major) => (
+            {filteredMajors.length > 0 ? filteredMajors.map((major) => (
               <div key={major.id} className="bg-white dark:bg-[#1c1c1e] p-6 rounded-[2rem] shadow-sm border border-gray-100 dark:border-gray-800">
                 <div className="mb-4 flex justify-between items-start">
                   <div>

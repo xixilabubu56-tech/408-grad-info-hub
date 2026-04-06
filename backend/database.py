@@ -14,14 +14,19 @@ SQLALCHEMY_DATABASE_URL = os.getenv(
     "mysql+pymysql://root:@localhost:3306/grad_info_408?charset=utf8mb4"
 )
 
-# 创建数据库引擎，开启 MySQL 专属的连接池优化
-engine = create_engine(
-    SQLALCHEMY_DATABASE_URL,
-    pool_size=10,
-    max_overflow=20,
-    pool_recycle=3600,
-    pool_pre_ping=True
-)
+engine_kwargs = {
+    "pool_pre_ping": True,
+}
+
+if SQLALCHEMY_DATABASE_URL.startswith("sqlite"):
+    engine_kwargs["connect_args"] = {"check_same_thread": False, "timeout": 30}
+else:
+    engine_kwargs["pool_size"] = int(os.getenv("DB_POOL_SIZE", "10"))
+    engine_kwargs["max_overflow"] = int(os.getenv("DB_MAX_OVERFLOW", "20"))
+    engine_kwargs["pool_recycle"] = int(os.getenv("DB_POOL_RECYCLE", "3600"))
+    engine_kwargs["pool_timeout"] = int(os.getenv("DB_POOL_TIMEOUT", "30"))
+
+engine = create_engine(SQLALCHEMY_DATABASE_URL, **engine_kwargs)
 
 # 创建会话本地类
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, bind=engine)

@@ -16,14 +16,19 @@ interface Institution {
   majorCount: number
   collegeCount: number
   noticeCount: number
+  latestYear: number | null
+  sampleMajors: string[]
   tags: string[]
 }
 
 export default function Institutions() {
   const [institutions, setInstitutions] = useState<Institution[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState(false)
   const [filterProvince, setFilterProvince] = useState('所在省份 (全部)')
   const [filterType, setFilterType] = useState('院校属性 (全部)')
+  const [degreeType, setDegreeType] = useState('学位类型 (全部)')
+  const [sortBy, setSortBy] = useState('按排名')
   const [keyword, setKeyword] = useState('')
 
   const navigate = useNavigate()
@@ -37,11 +42,19 @@ export default function Institutions() {
 
   useEffect(() => {
     const query = searchQuery.trim()
-    const url = query
-      ? apiUrl(`/api/institutions?q=${encodeURIComponent(query)}&limit=200`)
-      : apiUrl('/api/institutions?limit=200')
+    const params = new URLSearchParams()
+    params.set('limit', '200')
+    if (query) params.set('q', query)
+    if (filterProvince !== '所在省份 (全部)') params.set('province', filterProvince)
+    if (filterType === '985 工程') params.set('school_type', '985')
+    if (filterType === '211 工程') params.set('school_type', '211')
+    if (filterType === '双一流') params.set('school_type', 'double_first_class')
+    if (degreeType === '学硕') params.set('degree_type', 'academic')
+    if (degreeType === '专硕') params.set('degree_type', 'professional')
 
-    fetch(url)
+    const controller = new AbortController()
+
+    fetch(apiUrl(`/api/institutions?${params.toString()}`), { signal: controller.signal })
       .then((res) => {
         if (!res.ok) {
           throw new Error('institutions request failed')
@@ -50,28 +63,22 @@ export default function Institutions() {
       })
       .then((data: Institution[]) => {
         setInstitutions(data)
+        setError(false)
         setLoading(false)
       })
       .catch((err) => {
         console.error('Fetch Error:', err)
+        setError(true)
         setLoading(false)
       })
-  }, [searchQuery])
+
+    return () => controller.abort()
+  }, [degreeType, filterProvince, filterType, searchQuery])
 
   const filteredInstitutions = useMemo(
     () =>
       institutions.filter((inst) => {
         let match = true
-
-        if (filterProvince !== '所在省份 (全部)' && inst.province !== filterProvince) {
-          match = false
-        }
-
-        if (filterType !== '院校属性 (全部)') {
-          if (filterType === '985 工程' && !inst.is985) match = false
-          if (filterType === '211 工程' && !inst.is211) match = false
-          if (filterType === '双一流' && !inst.isDoubleFirstClass) match = false
-        }
 
         if (keyword.trim()) {
           const value = keyword.trim()
@@ -79,6 +86,7 @@ export default function Institutions() {
             inst.name,
             inst.province,
             inst.city,
+            ...(inst.sampleMajors ?? []),
             ...inst.tags,
           ]
             .filter(Boolean)
@@ -90,8 +98,22 @@ export default function Institutions() {
 
         return match
       }),
-    [filterProvince, filterType, institutions, keyword],
+    [institutions, keyword],
   )
+
+  const displayInstitutions = useMemo(() => {
+    const cloned = [...filteredInstitutions]
+    if (sortBy === '按专业数') {
+      cloned.sort((a, b) => b.majorCount - a.majorCount || a.ranking - b.ranking)
+    } else if (sortBy === '按通知数') {
+      cloned.sort((a, b) => b.noticeCount - a.noticeCount || a.ranking - b.ranking)
+    } else if (sortBy === '按最新年份') {
+      cloned.sort((a, b) => (b.latestYear ?? 0) - (a.latestYear ?? 0) || a.ranking - b.ranking)
+    } else {
+      cloned.sort((a, b) => a.ranking - b.ranking)
+    }
+    return cloned
+  }, [filteredInstitutions, sortBy])
 
   const allProvinces = Array.from(new Set(institutions.map((i) => i.province))).sort()
 
@@ -154,18 +176,18 @@ export default function Institutions() {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="rounded-[1.5rem] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1c1c1e] px-5 py-4">
               <div className="text-sm text-gray-500">当前结果</div>
-              <div className="text-2xl font-semibold mt-2">{loading ? '--' : filteredInstitutions.length}</div>
+              <div className="text-2xl font-semibold mt-2">{loading ? '--' : displayInstitutions.length}</div>
             </div>
             <div className="rounded-[1.5rem] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1c1c1e] px-5 py-4">
               <div className="text-sm text-gray-500">累计专业</div>
               <div className="text-2xl font-semibold mt-2">
-                {loading ? '--' : filteredInstitutions.reduce((sum, item) => sum + item.majorCount, 0)}
+                {loading ? '--' : displayInstitutions.reduce((sum, item) => sum + item.majorCount, 0)}
               </div>
             </div>
             <div className="rounded-[1.5rem] border border-gray-100 dark:border-gray-800 bg-white dark:bg-[#1c1c1e] px-5 py-4">
               <div className="text-sm text-gray-500">覆盖学院</div>
               <div className="text-2xl font-semibold mt-2">
-                {loading ? '--' : filteredInstitutions.reduce((sum, item) => sum + item.collegeCount, 0)}
+                {loading ? '--' : displayInstitutions.reduce((sum, item) => sum + item.collegeCount, 0)}
               </div>
             </div>
           </div>
@@ -190,6 +212,25 @@ export default function Institutions() {
               <option>211 工程</option>
               <option>双一流</option>
             </select>
+            <select
+              className="px-4 py-2 rounded-full bg-gray-50 dark:bg-black/30 border border-gray-200 dark:border-gray-800 text-sm focus:outline-none"
+              value={degreeType}
+              onChange={(e) => setDegreeType(e.target.value)}
+            >
+              <option>学位类型 (全部)</option>
+              <option>学硕</option>
+              <option>专硕</option>
+            </select>
+            <select
+              className="px-4 py-2 rounded-full bg-gray-50 dark:bg-black/30 border border-gray-200 dark:border-gray-800 text-sm focus:outline-none"
+              value={sortBy}
+              onChange={(e) => setSortBy(e.target.value)}
+            >
+              <option>按排名</option>
+              <option>按专业数</option>
+              <option>按通知数</option>
+              <option>按最新年份</option>
+            </select>
 
             {searchQuery && (
               <button
@@ -209,16 +250,29 @@ export default function Institutions() {
           </div>
         )}
 
-        {!loading && filteredInstitutions.length === 0 && (
+        {!loading && error && (
+          <div className="w-full py-14 flex flex-col justify-center items-center text-amber-700 bg-amber-50 rounded-[2rem] border border-amber-200 gap-3">
+            <p>院校接口暂时不可用，请确认后端服务和数据库状态。</p>
+            <button
+              type="button"
+              onClick={() => navigate(0)}
+              className="px-4 py-2 rounded-full bg-amber-100 hover:bg-amber-200 transition text-sm"
+            >
+              重新加载
+            </button>
+          </div>
+        )}
+
+        {!loading && !error && displayInstitutions.length === 0 && (
           <div className="w-full py-20 flex flex-col justify-center items-center text-gray-400 bg-white dark:bg-[#1c1c1e] rounded-[2rem] border border-gray-100 dark:border-gray-800">
             <Building2 className="w-16 h-16 mb-4 opacity-50" />
             <p>没有找到符合条件的 408 院校数据。</p>
           </div>
         )}
 
-        {!loading && filteredInstitutions.length > 0 && (
+        {!loading && !error && displayInstitutions.length > 0 && (
           <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            {filteredInstitutions.map((inst) => (
+            {displayInstitutions.map((inst) => (
               <div
                 key={inst.id}
                 onClick={() => navigate(`/institution/${inst.id}`)}
@@ -262,6 +316,22 @@ export default function Institutions() {
                       通知
                     </div>
                     <div className="text-lg font-semibold mt-2">{inst.noticeCount}</div>
+                  </div>
+                </div>
+
+                <div className="rounded-2xl bg-gray-50 dark:bg-black/30 px-4 py-3 mb-5">
+                  <div className="text-xs text-gray-500 mb-2">重点专业方向</div>
+                  <div className="flex flex-wrap gap-2">
+                    {inst.sampleMajors.map((major) => (
+                      <span key={major} className="px-2.5 py-1 rounded-full bg-white dark:bg-gray-900 text-xs border border-gray-200 dark:border-gray-800">
+                        {major}
+                      </span>
+                    ))}
+                    {inst.latestYear && (
+                      <span className="px-2.5 py-1 rounded-full bg-blue-50 dark:bg-blue-900/20 text-xs text-blue-600 dark:text-blue-400">
+                        最新年份 {inst.latestYear}
+                      </span>
+                    )}
                   </div>
                 </div>
 

@@ -45,7 +45,7 @@
 完整使用手册请查看：
 
 - [使用说明.md](file:///Users/macbook/Desktop/408project/information/docs/使用说明.md)
-- [GitHub与部署说明.md](file:///Users/macbook/Desktop/408project/information/docs/GitHub与部署说明.md)
+- [Git与GitHub使用说明.md](file:///Users/macbook/Desktop/408project/information/docs/Git与GitHub使用说明.md)
 
 快速启动：
 

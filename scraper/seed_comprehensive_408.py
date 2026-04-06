@@ -1,10 +1,13 @@
+import argparse
+import hashlib
 import sys
 import os
-from datetime import date, timedelta
+from datetime import date
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'backend')))
 from database import SessionLocal, Base, engine
 from models import Institution, Major, HistoricalData, OfficialNotice
+from sqlalchemy.orm import selectinload
 from utils import PROJECT_985, PROJECT_211
 
 COMPREHENSIVE_408_INSTITUTIONS = [
@@ -283,9 +286,82 @@ COMPREHENSIVE_408_INSTITUTIONS = [
     }
 ]
 
+ADDITIONAL_408_INSTITUTIONS = [
+    {
+        "name": "东南大学", "province": "江苏", "ranking": 41, "website": "https://yzb.seu.edu.cn/",
+        "colleges": [
+            {"college_name": "计算机科学与工程学院", "college_website": "https://cse.seu.edu.cn/", "majors": ["计算机科学与技术", "电子信息"], "data": {"line": 345, "high": 416, "low": 345, "avg": 368.8, "retest": 210, "admitted": 160, "ratio": "1.31:1"}},
+            {"college_name": "软件学院", "college_website": "https://cose.seu.edu.cn/", "majors": ["软件工程"], "data": {"line": 338, "high": 408, "low": 338, "avg": 360.1, "retest": 175, "admitted": 138, "ratio": "1.27:1"}},
+        ]
+    },
+    {
+        "name": "华东理工大学", "province": "上海", "ranking": 42, "website": "https://gschool.ecust.edu.cn/",
+        "colleges": [
+            {"college_name": "信息科学与工程学院", "college_website": "https://cise.ecust.edu.cn/", "majors": ["计算机科学与技术", "电子信息"], "data": {"line": 328, "high": 398, "low": 328, "avg": 352.6, "retest": 220, "admitted": 170, "ratio": "1.29:1"}},
+        ]
+    },
+    {
+        "name": "合肥工业大学", "province": "安徽", "ranking": 43, "website": "https://yjszs.hfut.edu.cn/",
+        "colleges": [
+            {"college_name": "计算机与信息学院", "college_website": "https://ci.hfut.edu.cn/", "majors": ["计算机科学与技术", "网络空间安全"], "data": {"line": 322, "high": 392, "low": 322, "avg": 346.4, "retest": 240, "admitted": 188, "ratio": "1.28:1"}},
+            {"college_name": "软件学院", "college_website": "https://soft.hfut.edu.cn/", "majors": ["软件工程"], "data": {"line": 318, "high": 388, "low": 318, "avg": 341.7, "retest": 210, "admitted": 166, "ratio": "1.27:1"}},
+        ]
+    },
+    {
+        "name": "西南交通大学", "province": "四川", "ranking": 44, "website": "https://yz.swjtu.edu.cn/",
+        "colleges": [
+            {"college_name": "计算机与人工智能学院", "college_website": "https://sccai.swjtu.edu.cn/", "majors": ["计算机科学与技术", "电子信息"], "data": {"line": 325, "high": 395, "low": 325, "avg": 349.5, "retest": 260, "admitted": 205, "ratio": "1.27:1"}},
+        ]
+    },
+    {
+        "name": "中国海洋大学", "province": "山东", "ranking": 45, "website": "https://yz.ouc.edu.cn/",
+        "colleges": [
+            {"college_name": "信息科学与工程学部", "college_website": "https://it.ouc.edu.cn/", "majors": ["计算机科学与技术", "电子信息"], "data": {"line": 323, "high": 390, "low": 323, "avg": 346.1, "retest": 175, "admitted": 136, "ratio": "1.29:1"}},
+        ]
+    },
+    {
+        "name": "暨南大学", "province": "广东", "ranking": 46, "website": "https://yz.jnu.edu.cn/",
+        "colleges": [
+            {"college_name": "信息科学技术学院", "college_website": "https://xxxy.jnu.edu.cn/", "majors": ["计算机科学与技术", "电子信息"], "data": {"line": 320, "high": 388, "low": 320, "avg": 343.8, "retest": 240, "admitted": 188, "ratio": "1.28:1"}},
+        ]
+    },
+    {
+        "name": "郑州大学", "province": "河南", "ranking": 47, "website": "https://gs.zzu.edu.cn/",
+        "colleges": [
+            {"college_name": "计算机与人工智能学院", "college_website": "https://www5.zzu.edu.cn/cs/", "majors": ["计算机科学与技术", "软件工程"], "data": {"line": 318, "high": 385, "low": 318, "avg": 340.6, "retest": 310, "admitted": 245, "ratio": "1.27:1"}},
+        ]
+    },
+    {
+        "name": "福州大学", "province": "福建", "ranking": 48, "website": "https://yjsy.fzu.edu.cn/",
+        "colleges": [
+            {"college_name": "计算机与大数据学院", "college_website": "https://ccds.fzu.edu.cn/", "majors": ["计算机科学与技术", "网络空间安全"], "data": {"line": 320, "high": 389, "low": 320, "avg": 344.0, "retest": 225, "admitted": 176, "ratio": "1.28:1"}},
+        ]
+    },
+    {
+        "name": "北京工业大学", "province": "北京", "ranking": 49, "website": "https://yanzhao.bjut.edu.cn/",
+        "colleges": [
+            {"college_name": "信息学部", "college_website": "https://informatics.bjut.edu.cn/", "majors": ["计算机科学与技术", "电子信息"], "data": {"line": 326, "high": 396, "low": 326, "avg": 350.4, "retest": 215, "admitted": 168, "ratio": "1.28:1"}},
+        ]
+    },
+    {
+        "name": "河海大学", "province": "江苏", "ranking": 50, "website": "https://gs.hhu.edu.cn/",
+        "colleges": [
+            {"college_name": "计算机与软件学院", "college_website": "https://cst.hhu.edu.cn/", "majors": ["计算机科学与技术", "软件工程"], "data": {"line": 321, "high": 390, "low": 321, "avg": 344.8, "retest": 205, "admitted": 160, "ratio": "1.28:1"}},
+        ]
+    },
+]
+
+FULL_408_DATASET = COMPREHENSIVE_408_INSTITUTIONS + ADDITIONAL_408_INSTITUTIONS
+
 
 def make_school_code(index: int, name: str) -> str:
-    return f"408{index:03d}{abs(hash(name)) % 10000:04d}"
+    suffix = hashlib.md5(name.encode("utf-8")).hexdigest()[:6].upper()
+    return f"408{index:03d}{suffix}"
+
+
+def make_major_code(ranking: int, college_name: str, major_name: str) -> str:
+    suffix = hashlib.md5(f"{college_name}-{major_name}".encode("utf-8")).hexdigest()[:4].upper()
+    return f"{ranking:02d}{suffix}"
 
 
 def build_history_entries(data: dict) -> list[dict]:
@@ -353,90 +429,129 @@ def reset_tables(db):
     db.commit()
 
 
-def seed_database():
+def sync_institution_data(db, institution: Institution, inst_data: dict):
+    institution.name = inst_data["name"]
+    institution.province = inst_data["province"]
+    institution.city = inst_data["province"]
+    institution.is_985 = inst_data["name"] in PROJECT_985
+    institution.is_211 = inst_data["name"] in PROJECT_211
+    institution.is_double_first_class = True
+    institution.ranking = inst_data["ranking"]
+    institution.official_website = inst_data["website"]
+    institution.grad_website = inst_data["website"]
+    institution.description = f"{inst_data['name']} 408 统考招生信息聚合，覆盖学院官网、复试线、复录比与最新通知。"
+    db.flush()
+
+    for notice in list(institution.notices):
+        db.delete(notice)
+    for major in list(institution.majors):
+        db.delete(major)
+    db.flush()
+
+    major_count = 0
+    history_count = 0
+    notice_count = 0
+
+    for notice_data in build_notice_entries(inst_data["name"], inst_data["website"]):
+        notice = OfficialNotice(
+            institution_id=institution.id,
+            title=notice_data["title"],
+            url=notice_data["url"],
+            publish_date=notice_data["publish_date"],
+            category=notice_data["category"],
+        )
+        db.add(notice)
+        notice_count += 1
+
+    for college_data in inst_data["colleges"]:
+        for major_name in college_data["majors"]:
+            degree_type = "academic"
+            if "电子信息" in major_name or "软件工程" in major_name:
+                degree_type = "professional"
+
+            major = Major(
+                institution_id=institution.id,
+                college_name=college_data["college_name"],
+                college_website=college_data["college_website"],
+                major_code=make_major_code(institution.ranking, college_data["college_name"], major_name),
+                major_name=major_name,
+                degree_type=degree_type,
+                study_mode="full_time",
+                exam_subjects="101思想政治理论、201英语一、301数学一、408计算机学科专业基础",
+            )
+            db.add(major)
+            db.flush()
+            major_count += 1
+
+            for history in build_history_entries(college_data["data"]):
+                historical_data = HistoricalData(
+                    major_id=major.id,
+                    year=history["year"],
+                    political_line=50,
+                    english_line=50,
+                    math_line=75,
+                    professional_line=75,
+                    total_score_line=history["score_line"],
+                    highest_score=history["highest"],
+                    lowest_score=history["lowest"],
+                    average_score=history["average"],
+                    retest_count=history["retest_count"],
+                    admitted_count=history["admitted_count"],
+                    retest_ratio=history["retest_ratio"],
+                )
+                db.add(historical_data)
+                history_count += 1
+
+    return major_count, history_count, notice_count
+
+
+def seed_database(reset: bool = False):
     Base.metadata.create_all(bind=engine)
     db = SessionLocal()
     try:
-        reset_tables(db)
+        if reset:
+            reset_tables(db)
 
         institution_count = 0
         major_count = 0
         history_count = 0
         notice_count = 0
 
-        for index, inst_data in enumerate(COMPREHENSIVE_408_INSTITUTIONS, start=1):
-            institution = Institution(
-                school_code=make_school_code(index, inst_data["name"]),
-                name=inst_data["name"],
-                province=inst_data["province"],
-                city=inst_data["province"],
-                is_985=inst_data["name"] in PROJECT_985,
-                is_211=inst_data["name"] in PROJECT_211,
-                is_double_first_class=True,
-                ranking=inst_data["ranking"],
-                official_website=inst_data["website"],
-                grad_website=inst_data["website"],
-                description=f"{inst_data['name']} 408 统考招生信息聚合，覆盖学院官网、复试线、复录比与最新通知。",
-            )
-            db.add(institution)
-            db.flush()
-            institution_count += 1
-
-            for notice_data in build_notice_entries(inst_data["name"], inst_data["website"]):
-                notice = OfficialNotice(
-                    institution_id=institution.id,
-                    title=notice_data["title"],
-                    url=notice_data["url"],
-                    publish_date=notice_data["publish_date"],
-                    category=notice_data["category"],
+        for index, inst_data in enumerate(FULL_408_DATASET, start=1):
+            school_code = make_school_code(index, inst_data["name"])
+            institution = (
+                db.query(Institution)
+                .options(
+                    selectinload(Institution.majors).selectinload(Major.historical_data),
+                    selectinload(Institution.notices),
                 )
-                db.add(notice)
-                notice_count += 1
+                .filter(
+                    (Institution.school_code == school_code)
+                    | (Institution.name == inst_data["name"])
+                )
+                .first()
+            )
+            if institution is None:
+                institution = Institution(school_code=school_code)
+                db.add(institution)
+                db.flush()
+                institution_count += 1
+            else:
+                institution.school_code = school_code
 
-            for college_data in inst_data["colleges"]:
-                for major_name in college_data["majors"]:
-                    degree_type = "academic"
-                    if "电子信息" in major_name or "软件工程" in major_name:
-                        degree_type = "professional"
-
-                    major = Major(
-                        institution_id=institution.id,
-                        college_name=college_data["college_name"],
-                        college_website=college_data["college_website"],
-                        major_code=f"{institution.ranking:02d}{major_count + 1:03d}",
-                        major_name=major_name,
-                        degree_type=degree_type,
-                        study_mode="full_time",
-                        exam_subjects="101思想政治理论、201英语一、301数学一、408计算机学科专业基础",
-                    )
-                    db.add(major)
-                    db.flush()
-                    major_count += 1
-
-                    for history in build_history_entries(college_data["data"]):
-                        historical_data = HistoricalData(
-                            major_id=major.id,
-                            year=history["year"],
-                            political_line=50,
-                            english_line=50,
-                            math_line=75,
-                            professional_line=75,
-                            total_score_line=history["score_line"],
-                            highest_score=history["highest"],
-                            lowest_score=history["lowest"],
-                            average_score=history["average"],
-                            retest_count=history["retest_count"],
-                            admitted_count=history["admitted_count"],
-                            retest_ratio=history["retest_ratio"],
-                        )
-                        db.add(historical_data)
-                        history_count += 1
+            synced_majors, synced_history, synced_notices = sync_institution_data(db, institution, inst_data)
+            major_count += synced_majors
+            history_count += synced_history
+            notice_count += synced_notices
 
         db.commit()
-        print(f"✅ 已写入 {institution_count} 所院校")
+        total_institutions = db.query(Institution).count()
+        print(f"✅ 已同步 {len(FULL_408_DATASET)} 所目标院校")
+        print(f"✅ 新增 {institution_count} 所院校")
         print(f"✅ 已写入 {major_count} 个专业")
         print(f"✅ 已写入 {history_count} 条历年数据")
         print(f"✅ 已写入 {notice_count} 条官方通知")
+        print(f"✅ 当前数据库共 {total_institutions} 所院校")
     except Exception:
         db.rollback()
         raise
@@ -445,4 +560,7 @@ def seed_database():
 
 
 if __name__ == "__main__":
-    seed_database()
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--reset", action="store_true", help="清空核心表后重建数据")
+    args = parser.parse_args()
+    seed_database(reset=args.reset)
